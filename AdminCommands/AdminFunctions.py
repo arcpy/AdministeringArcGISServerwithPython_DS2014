@@ -63,6 +63,289 @@ class ADMINCON(object):
         else:
             print "Token is still valid"
 
+    def getFolders(self):
+        ''' Function to get all folders on a server     
+        '''        
+
+        foldersList = sendAGSReq(self.URL + "/services" + self.basicQ, '')      
+        folders = foldersList["folders"]
+    
+        # Return a list of folders to the function which called for them
+        return folders
+
+    def createFolder(self, folderName, folderDescription):
+        ''' Function to create a folder
+        folderName = String with a folder name
+        folderDescription = String with a description for the folder
+        '''     
+    
+        # Dictionary of properties to create a folder
+        folderProp_dict = { "folderName": folderName,
+                            "description": folderDescription
+                          }
+    
+        folder_encode = urllib.urlencode(folderProp_dict)            
+        folderStatus = sendAGSReq(self.URL + "/services/createFolder" + self.basicQ, folderProp_dict)  
+    
+        if checkMSG(folderStatus):
+            print "Created folder: {}".format(folderName)
+        else:
+            print "Could not create folder:\n" + str(folderStatus)
+        
+        return
+        
+    def renameService(self, service, newName):
+        ''' Function to rename a service
+        service = String of existing service with type separated by a period <serviceName>.<serviceType>
+        newName = String of new service name  
+        '''       
+    
+        service = urllib.quote(service.encode('utf8'))  
+    
+        # Check the service name for a folder:
+        if "//" in service:
+            serviceName = service.split('.')[0].split("//")[1]
+            folderName = service.split('.')[0].split("//")[0] + "/" 
+        else:
+            serviceName = service.split('.')[0]
+            folderName = ""
+    
+        renameService_dict = { "serviceName": serviceName,
+                               "serviceType": service.split('.')[1],
+                               "serviceNewName" : urllib.quote(newName.encode('utf8')) 
+                             }
+     
+        renameStatus = sendAGSReq(self.URL + "/services/renameService" + self.basicQ, renameService_dict)  
+    
+        if checkMSG(renameStatus):
+            print "Successfully renamed service to : {}".format(newName)
+        else:
+            print "Could not rename service:\n" + renameStatus
+        
+        return
+
+    def getServiceList(self):
+        ''' Function to get all services
+        Note: Will not return any services in the Utilities or System folder
+        '''      
+    
+        services = []    
+        folder = ''        
+        serviceList = sendAGSReq(self.URL + "/services" + self.basicQ, '')  
+
+        # Build up list of services at the root level
+        for single in serviceList["services"]:
+            services.append(single['serviceName'] + '.' + single['type'])
+     
+        # Build up list of folders and remove the System and Utilities folder (we dont want anyone playing with them)
+        folderList = serviceList["folders"]
+        folderList.remove("Utilities")             
+        folderList.remove("System")        
+
+        for folder in folderList:                      
+            fList = sendAGSReq(self.URL + "/services/{}".format(folder) + self.basicQ, '')  
+            for single in fList["services"]:
+                services.append(folder + "//" + single['serviceName'] + '.' + single['type'])                
+    
+        print services    
+        return services
+
+    def stopStartServices(self,stopStart, serviceList):  
+        ''' Function to stop, start or delete a service.
+        stopStart = Stop|Start|Delete
+        serviceList = List of services. A service must be in the <name>.<type> notation
+        '''    
+    
+        # modify the services(s)    
+        for service in serviceList:
+            status = sendAGSReq(self.URL + "/services/{}/{}".format(service, stopStart) + self.basicQ, '')  
+        
+            if checkMSG(status):
+                print (str(service) + " === " + str(stopStart))
+            else:            
+                print status
+    
+        return 
+
+    def securityReport(self):
+        ''' Get the security settings on the Server
+        '''
+    
+        securityReport = sendAGSReq(self.URL + "/security/config" + self.basicQ, '')      
+
+        print "\n  ==Security settings==\n"
+        for k, v in securityReport.iteritems():
+            if type(v) == dict:
+                print "{0}...".format(k)
+                for sK, sV in v.iteritems():
+                    print "{0:14}{1:13} : {2}".format(" ", sK, sV)
+            else:
+                print "{0:27} : {1}".format(k, v)    
+    
+        return
+
+    def modifyLogs(self, clearLogs, logLevel):
+        ''' Function to clear logs and modify log settings.
+        clearLogs = True|False
+        logLevel = SEVERE|WARNING|FINE|VERBOSE|DEBUG
+        '''        
+   
+        # Clear existing logs
+        if clearLogs:
+            clearStatus = sendAGSReq(self.URL + "/logs/clean" + self.basicQ, '') 
+            if checkMSG(clearStatus['status']):
+                print "Cleared log files"
+       
+        # Get the current logDir, maxErrorReportsCount and maxLogFileAge as we dont want to modify those
+        logSettings = sendAGSReq(self.URL + "/logs/settings" + self.basicQ, '') 
+        logSettingProps = logSettings['settings']  
+    
+        # Place the current settings, along with new log setting back into the payload
+        logLevel_dict = {"logDir": logSettingProps['logDir'],
+                         "logLevel": logLevel,
+                         "maxErrorReportsCount": logSettingProps['maxErrorReportsCount'],
+                         "maxLogFileAge": logSettingProps['maxLogFileAge']                       
+                        }
+   
+        # Modify the logLevel
+        logStatus = sendAGSReq(self.URL + "/logs/settings/edit" + self.basicQ, logLevel_dict)     
+    
+        if checkMSG(logStatus):
+            print "Successfully changed log level to {}".format(logLevel)        
+        else:
+            print "Log level not changed:\n" + logStatus
+        
+        return
+        
+    def getServerInfo(self):
+        ''' Function to get and display a detailed report about a server    
+        '''    
+    
+        report = ''
+        report += "*-----------------------------------------------*\n\n"
+    
+        # Get Cluster and Machine info
+        jCluster = sendAGSReq(self.URL + "/clusters" + self.basicQ, '')  
+       
+        if len(jCluster["clusters"]) == 0:        
+            report += "No clusters found\n\n"
+        else:    
+            for cluster in jCluster["clusters"]:    
+                report += "Cluster: {} is {}\n".format(cluster["clusterName"], cluster["configuredState"])            
+                if len(cluster["machineNames"])     == 0:
+                    report += "    No machines associated with cluster\n"                
+                else:
+                    # Get individual Machine info
+                    for machine in cluster["machineNames"]:       
+                        jMachine = sendAGSReq(self.URL + "/machines/{}".format(machine) + self.basicQ, '')  
+                        report += "    Machine: {} is {}. (Platform: {})\n".format(machine, jMachine["configuredState"],jMachine["platform"])                    
+        
+                    
+        # Get Version and Build
+        jInfo = sendAGSReq(self.URL + "/info" + self.basicQ, '') 
+        report += "\nVersion: {}\nBuild:   {}\n\n".format(jInfo ["currentversion"], jInfo ["currentbuild"])
+      
+
+        # Get Log level   
+        jLog = sendAGSReq(self.URL + "/logs/settings" + self.basicQ, '') 
+        report += "Log level: {}\n\n".format(jLog["settings"]["logLevel"])
+     
+    
+        #Get License information
+        jLicense = sendAGSReq(self.URL + "/system/licenses" + self.basicQ, '') 
+        report += "License is: {} / {}\n".format(jLicense["edition"]["name"], jLicense["level"]["name"])    
+        if jLicense["edition"]["canExpire"] == True:
+            import datetime
+            d = datetime.date.fromtimestamp(jLicense["edition"]["expiration"] // 1000) #time in milliseconds since epoch
+            report += "License set to expire: {}\n".format(datetime.datetime.strftime(d, '%Y-%m-%d'))        
+        else:
+            report += "License does not expire\n"        
+    
+        
+        if len(jLicense["extensions"]) == 0:
+            report += "No available extensions\n"        
+        else:
+            report += "Available Extensions........\n"   
+            for name in jLicense["extensions"]:            
+                report += "extension:  {}\n".format(name["name"])            
+               
+    
+        report += "\n*-----------------------------------------------*\n"
+    
+        print report
+    
+
+    def listRoles(self):
+        ''' List all the current roles on the Server
+        '''
+    
+        roleList = sendAGSReq(self.URL + "/security/roles/getRoles" + self.basicQ, '')      
+    
+        if len(roleList['roles']) == 0:
+            print "\nNo Roles found. Is security enabled?"
+        else:
+            print "\n___Roles___"
+            for role in roleList['roles']:
+                for k, v in role.iteritems():
+                    if k == 'rolename':
+                        print v
+                    if k == 'description':
+                        print " ... {0}".format(v)
+    
+        return
+
+    def listUsers(self):
+        ''' List all the users in the server security store
+        '''
+    
+        userList = sendAGSReq(self.URL + "/security/users/getUsers" + self.basicQ, '')      
+    
+        if len(userList['users']) == 0:
+            print "No Users found. Is security enabled?"
+        else:
+            print "\n___Users___"
+            for user in userList['users']:
+                for k, v in user.iteritems():
+                    print "{0:11} : {1}".format(k, v)
+    
+        return
+
+    def listUsersInRole(self, role):
+        ''' List all users that belong to a given role
+        '''
+   
+        userList = sendAGSReq(self.URL + "/security/roles/getUsersWithinRole" + self.basicQ, {"rolename": role}) 
+        if len(userList['users']) >0:
+            print "Found these users in '{0}' role...".format(role)
+            for user in userList['users']:
+                print user
+        else:
+            print "No users found in '{0}' role".format(role)
+    
+
+    def listRolesByUser(self, user):
+        ''' List all roles that a given user belongs to
+        '''
+    
+        roleList = sendAGSReq(self.URL + "/security/roles/getRolesForUser" + self.basicQ, {"username": user}) 
+        if len(roleList['roles']) >0:
+            print "Found these roles for '{0}'...".format(user)
+            for role in roleList['roles']:
+                print role
+        else:
+            print "No roles found for '{0}'".format(user)
+    
+
+    def exportSite(self, pathToExport):
+        ''' Export (make a backup) of the AGS Site.
+        A directory is given, the file will be created with the date and suffix of .agssite
+        '''
+    
+        exportJSON = sendAGSReq(self.URL + "/exportSite" + self.basicQ, {"location": pathToExport}) 
+        if checkMSG(exportJSON):
+            print "Exported site to {0}".format(exportJSON['location'])
+        else:
+            print exportJSON
 ### helper functions ###      
 
 def sendAGSReq(URL, query_dict):
@@ -90,342 +373,50 @@ def checkMSG(jsonMSG):
     
 ### //helper functions ###     
     
-def modifyLogs(clearLogs, logLevel):
-    ''' Function to clear logs and modify log settings.
-    clearLogs = True|False
-    logLevel = SEVERE|WARNING|FINE|VERBOSE|DEBUG
-    '''        
-   
-    # Clear existing logs
-    if clearLogs:
-        clearStatus = sendAGSReq(CON.URL + "/logs/clean" + CON.basicQ, '') 
-        if checkMSG(clearStatus['status']):
-            print "Cleared log files"
-       
-    # Get the current logDir, maxErrorReportsCount and maxLogFileAge as we dont want to modify those
-    logSettings = sendAGSReq(CON.URL + "/logs/settings" + CON.basicQ, '') 
-    logSettingProps = logSettings['settings']  
-    
-    # Place the current settings, along with new log setting back into the payload
-    logLevel_dict = {"logDir": logSettingProps['logDir'],
-                     "logLevel": logLevel,
-                     "maxErrorReportsCount": logSettingProps['maxErrorReportsCount'],
-                     "maxLogFileAge": logSettingProps['maxLogFileAge']                       
-                    }
-   
-    # Modify the logLevel
-    logStatus = sendAGSReq(CON.URL + "/logs/settings/edit" + CON.basicQ, logLevel_dict)     
-    
-    if checkMSG(logStatus):
-        print "Successfully changed log level to {}".format(logLevel)        
-    else:
-        print "Log level not changed:\n" + logStatus
-        
-    return
-        
-        
-def createFolder(folderName, folderDescription):
-    ''' Function to create a folder
-    folderName = String with a folder name
-    folderDescription = String with a description for the folder
-    '''     
-    
-    # Dictionary of properties to create a folder
-    folderProp_dict = { "folderName": folderName,
-                        "description": folderDescription
-                      }
-    
-    folder_encode = urllib.urlencode(folderProp_dict)            
-    folderStatus = sendAGSReq(CON.URL + "/services/createFolder" + CON.basicQ, folderProp_dict)  
-    
-    if checkMSG(folderStatus):
-        print "Created folder: {}".format(folderName)
-    else:
-        print "Could not create folder:\n" + str(folderStatus)
-        
-    return
-        
 
-def getFolders():
-    ''' Function to get all folders on a server     
-    '''        
-
-    foldersList = sendAGSReq(CON.URL + "/services" + CON.basicQ, '')      
-    folders = foldersList["folders"]
-    
-    # Return a list of folders to the function which called for them
-    return folders
-
-
-def renameService(service, newName):
-    ''' Function to rename a service
-    service = String of existing service with type separated by a period <serviceName>.<serviceType>
-    newName = String of new service name  
-    '''       
-    
-    service = urllib.quote(service.encode('utf8'))  
-    
-    # Check the service name for a folder:
-    if "//" in service:
-        serviceName = service.split('.')[0].split("//")[1]
-        folderName = service.split('.')[0].split("//")[0] + "/" 
-    else:
-        serviceName = service.split('.')[0]
-        folderName = ""
-    
-    renameService_dict = { "serviceName": serviceName,
-                           "serviceType": service.split('.')[1],
-                           "serviceNewName" : urllib.quote(newName.encode('utf8')) 
-                         }
-     
-    renameStatus = sendAGSReq(CON.URL + "/services/renameService" + CON.basicQ, renameService_dict)  
-    
-    if checkMSG(renameStatus):
-        print "Successfully renamed service to : {}".format(newName)
-    else:
-        print "Could not rename service:\n" + renameStatus
-        
-    return
-
- 
-def stopStartServices(stopStart, serviceList):  
-    ''' Function to stop, start or delete a service.
-    stopStart = Stop|Start|Delete
-    serviceList = List of services. A service must be in the <name>.<type> notation
-    '''    
-    
-    # modify the services(s)    
-    for service in serviceList:
-        status = sendAGSReq(CON.URL + "/services/{}/{}".format(service, stopStart) + CON.basicQ, '')  
-        
-        if checkMSG(status):
-            print (str(service) + " === " + str(stopStart))
-        else:            
-            print status
-    
-    return 
-   
-
-
-def getServiceList():
-    ''' Function to get all services
-    Note: Will not return any services in the Utilities or System folder
-    '''      
-    
-    services = []    
-    folder = ''        
-    serviceList = sendAGSReq(CON.URL + "/services" + CON.basicQ, '')  
-
-    # Build up list of services at the root level
-    for single in serviceList["services"]:
-        services.append(single['serviceName'] + '.' + single['type'])
-     
-    # Build up list of folders and remove the System and Utilities folder (we dont want anyone playing with them)
-    folderList = serviceList["folders"]
-    folderList.remove("Utilities")             
-    folderList.remove("System")        
-
-    for folder in folderList:                      
-        fList = sendAGSReq(CON.URL + "/services/{}".format(folder) + CON.basicQ, '')  
-        for single in fList["services"]:
-            services.append(folder + "//" + single['serviceName'] + '.' + single['type'])                
-    
-    print services    
-    return services
-
-
-def getServerInfo():
-    ''' Function to get and display a detailed report about a server    
-    '''    
-    
-    report = ''
-    report += "*-----------------------------------------------*\n\n"
-    
-    # Get Cluster and Machine info
-    jCluster = sendAGSReq(CON.URL + "/clusters" + CON.basicQ, '')  
-       
-    if len(jCluster["clusters"]) == 0:        
-        report += "No clusters found\n\n"
-    else:    
-        for cluster in jCluster["clusters"]:    
-            report += "Cluster: {} is {}\n".format(cluster["clusterName"], cluster["configuredState"])            
-            if len(cluster["machineNames"])     == 0:
-                report += "    No machines associated with cluster\n"                
-            else:
-                # Get individual Machine info
-                for machine in cluster["machineNames"]:       
-                    jMachine = sendAGSReq(CON.URL + "/machines/{}".format(machine) + CON.basicQ, '')  
-                    report += "    Machine: {} is {}. (Platform: {})\n".format(machine, jMachine["configuredState"],jMachine["platform"])                    
-        
-                    
-    # Get Version and Build
-    jInfo = sendAGSReq(CON.URL + "/info" + CON.basicQ, '') 
-    report += "\nVersion: {}\nBuild:   {}\n\n".format(jInfo ["currentversion"], jInfo ["currentbuild"])
-      
-
-    # Get Log level   
-    jLog = sendAGSReq(CON.URL + "/logs/settings" + CON.basicQ, '') 
-    report += "Log level: {}\n\n".format(jLog["settings"]["logLevel"])
-     
-    
-    #Get License information
-    jLicense = sendAGSReq(CON.URL + "/system/licenses" + CON.basicQ, '') 
-    report += "License is: {} / {}\n".format(jLicense["edition"]["name"], jLicense["level"]["name"])    
-    if jLicense["edition"]["canExpire"] == True:
-        import datetime
-        d = datetime.date.fromtimestamp(jLicense["edition"]["expiration"] // 1000) #time in milliseconds since epoch
-        report += "License set to expire: {}\n".format(datetime.datetime.strftime(d, '%Y-%m-%d'))        
-    else:
-        report += "License does not expire\n"        
-    
-        
-    if len(jLicense["extensions"]) == 0:
-        report += "No available extensions\n"        
-    else:
-        report += "Available Extensions........\n"   
-        for name in jLicense["extensions"]:            
-            report += "extension:  {}\n".format(name["name"])            
-               
-    
-    report += "\n*-----------------------------------------------*\n"
-    
-    print report
-    
-
-def securityReport():
-    ''' Get the security settings on the Server
-    '''
-    
-    securityReport = sendAGSReq(CON.URL + "/security/config" + CON.basicQ, '')      
-
-    print "\n  ==Security settings==\n"
-    for k, v in securityReport.iteritems():
-        if type(v) == dict:
-            print "{0}...".format(k)
-            for sK, sV in v.iteritems():
-                print "{0:14}{1:13} : {2}".format(" ", sK, sV)
-        else:
-            print "{0:27} : {1}".format(k, v)    
-    
-    return
-    
-
-def listRoles():
-    ''' List all the current roles on the Server
-    '''
-    
-    roleList = sendAGSReq(CON.URL + "/security/roles/getRoles" + CON.basicQ, '')      
-    
-    if len(roleList['roles']) == 0:
-        print "\nNo Roles found. Is security enabled?"
-    else:
-        print "\n___Roles___"
-        for role in roleList['roles']:
-            for k, v in role.iteritems():
-                if k == 'rolename':
-                    print v
-                if k == 'description':
-                    print " ... {0}".format(v)
-    
-    return
-
-
-def listUsers():
-    ''' List all the users in the server security store
-    '''
-    
-    userList = sendAGSReq(CON.URL + "/security/users/getUsers" + CON.basicQ, '')      
-    
-    if len(userList['users']) == 0:
-        print "No Users found. Is security enabled?"
-    else:
-        print "\n___Users___"
-        for user in userList['users']:
-            for k, v in user.iteritems():
-                print "{0:11} : {1}".format(k, v)
-    
-    return
-
-    
-def listUsersInRole(role):
-    ''' List all users that belong to a given role
-    '''
-   
-    userList = sendAGSReq(CON.URL + "/security/roles/getUsersWithinRole" + CON.basicQ, {"rolename": role}) 
-    if len(userList['users']) >0:
-        print "Found these users in '{0}' role...".format(role)
-        for user in userList['users']:
-            print user
-    else:
-        print "No users found in '{0}' role".format(role)
-    
-
-def listRolesByUser(user):
-    ''' List all roles that a given user belongs to
-    '''
-    
-    roleList = sendAGSReq(CON.URL + "/security/roles/getRolesForUser" + CON.basicQ, {"username": user}) 
-    if len(roleList['roles']) >0:
-        print "Found these roles for '{0}'...".format(user)
-        for role in roleList['roles']:
-            print role
-    else:
-        print "No roles found for '{0}'".format(user)
-    
-
-def exportSite(pathToExport):
-    ''' Export (make a backup) of the AGS Site.
-    A directory is given, the file will be created with the date and suffix of .agssite
-    '''
-    
-    exportJSON = sendAGSReq(CON.URL + "/exportSite" + CON.basicQ, {"location": pathToExport}) 
-    if checkMSG(exportJSON):
-        print "Exported site to {0}".format(exportJSON['location'])
-    else:
-        print exportJSON
         
     
 
-##### EXAMPLE CALLS TO ABOVE FUNCTIONS #####
+###### EXAMPLE CALLS TO ABOVE FUNCTIONS #####
 
-CON = ADMINCON('admin', 'admin', 'arcola', 6080)
+#CON = ADMINCON('admin', 'admin', 'arcola', 6080)
 
-# Clear log files and change to Debug:
-modifyLogs(True, "DEBUG")
+## Clear log files and change to Debug:
+#modifyLogs(True, "DEBUG")
 
-# Check on the token
-CON.checkExpiredToken()
+## Check on the token
+#CON.checkExpiredToken()
 
-# Create a folder:
-createFolder("testServices", "Folder for test services")
+## Create a folder:
+#createFolder("testServices", "Folder for test services")
 
-# Get a list of folders and assign to a variable:
-serverFolders = getFolders()
-print serverFolders
+## Get a list of folders and assign to a variable:
+#serverFolders = getFolders()
+#print serverFolders
 
-# Rename a service
-renameService("Buffer.GPServer", "BufferPolys")
+## Rename a service
+#renameService("Buffer.GPServer", "BufferPolys")
 
-# Stop, start or delete a service
-serviceList = ["PolyCover.GPServer","BufferPolys.GPServer"]
-stopStartServices("Stop", serviceList)
+## Stop, start or delete a service
+#serviceList = ["PolyCover.GPServer","BufferPolys.GPServer"]
+#stopStartServices("Stop", serviceList)
 
-# Get a list of services
-serviceList = getServiceList()
-for service in serviceList:
-    print service
+## Get a list of services
+#serviceList = getServiceList()
+#for service in serviceList:
+#    print service
 
-# Get information about the server
-getServerInfo()
+## Get information about the server
+#getServerInfo()
 
-# Security...list users and roles
-securityReport()
-listRoles()
-listUsers()
-listUsersInRole("KevinUser")
-listUsersInRole("RestrictedPublishers")
-listRolesByUser("kevin")
+## Security...list users and roles
+#securityReport()
+#listRoles()
+#listUsers()
+#listUsersInRole("KevinUser")
+#listUsersInRole("RestrictedPublishers")
+#listRolesByUser("kevin")
 
-# Backup the site to a directory
-exportSite(r"c:\arcgisserver")
+## Backup the site to a directory
+#exportSite(r"c:\arcgisserver")
 
