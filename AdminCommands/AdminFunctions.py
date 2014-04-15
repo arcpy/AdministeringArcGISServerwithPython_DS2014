@@ -158,13 +158,13 @@ class ADMINCON(object):
     
         # modify the services(s)    
         for service in serviceList:
+            self.checkExpiredToken()
             status = sendAGSReq(self.URL + "/services/{}/{}".format(service, stopStart) + self.basicQ, '')  
         
             if checkMSG(status):
                 print (str(service) + " === " + str(stopStart))
             else:            
                 print status
-    
         return 
 
     def securityReport(self):
