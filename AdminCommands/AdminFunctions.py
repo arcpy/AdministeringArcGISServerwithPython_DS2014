@@ -120,7 +120,7 @@ class ADMINCON(object):
         if checkMSG(renameStatus):
             print "Successfully renamed service to : {}".format(newName)
         else:
-            print "Could not rename service:\n" + renameStatus
+            print "Could not rename service:\n" + str(renameStatus)
         
         return
 
@@ -372,51 +372,5 @@ def checkMSG(jsonMSG):
         return False
     
 ### //helper functions ###     
-    
 
-        
-    
-
-###### EXAMPLE CALLS TO ABOVE FUNCTIONS #####
-
-#CON = ADMINCON('admin', 'admin', 'arcola', 6080)
-
-## Clear log files and change to Debug:
-#modifyLogs(True, "DEBUG")
-
-## Check on the token
-#CON.checkExpiredToken()
-
-## Create a folder:
-#createFolder("testServices", "Folder for test services")
-
-## Get a list of folders and assign to a variable:
-#serverFolders = getFolders()
-#print serverFolders
-
-## Rename a service
-#renameService("Buffer.GPServer", "BufferPolys")
-
-## Stop, start or delete a service
-#serviceList = ["PolyCover.GPServer","BufferPolys.GPServer"]
-#stopStartServices("Stop", serviceList)
-
-## Get a list of services
-#serviceList = getServiceList()
-#for service in serviceList:
-#    print service
-
-## Get information about the server
-#getServerInfo()
-
-## Security...list users and roles
-#securityReport()
-#listRoles()
-#listUsers()
-#listUsersInRole("KevinUser")
-#listUsersInRole("RestrictedPublishers")
-#listRolesByUser("kevin")
-
-## Backup the site to a directory
-#exportSite(r"c:\arcgisserver")
 
